@@ -98,6 +98,7 @@ _BACKWARD_COMPAT_MAP = {
     "prefill_attention": "attention.prefill_attention",
     "unified_attention_sparse_mla": "attention.unified_attention_sparse_mla",
     "unified_attention": "attention.unified_attention",
+    "mxfp8_attention": "attention.mxfp8_attention",
     # Fusions modules (fusions/)
     "fused_kv_cache": "fusions.fused_kv_cache",
     "fused_mul_add": "fusions.fused_mul_add",
@@ -134,6 +135,7 @@ _BACKWARD_COMPAT_MAP = {
     # Quant modules (quant/)
     "fused_fp8_quant": "quant.fused_fp8_quant",
     "fused_mxfp4_quant": "quant.fused_mxfp4_quant",
+    "quant_mxfp8": "quant.quant_mxfp8",
 }
 
 

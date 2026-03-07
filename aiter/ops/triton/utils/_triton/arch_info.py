@@ -17,6 +17,10 @@ def get_arch():
     return arch
 
 
+def is_cdna4():
+    return get_arch() in ("gfx950")
+
+
 def is_fp4_avail():
     return get_arch() in ("gfx950")
 

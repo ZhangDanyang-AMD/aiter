@@ -22,6 +22,11 @@ from .fused_mxfp4_quant import (
     fused_dynamic_mxfp4_quant_moe_sort,
 )
 
+from .quant_mxfp8 import (
+    convert_to_mxfp8,
+    convert_from_mxfp8,
+)
+
 __all__ = [
     # quant.py exports
     "static_per_tensor_quant_fp8_i8",
@@ -41,4 +46,7 @@ __all__ = [
     "fused_reduce_act_mul_and_mxfp4_quant",
     "fused_reduce_rms_mxfp4_quant",
     "fused_dynamic_mxfp4_quant_moe_sort",
+    # quant_mxfp8.py exports
+    "convert_to_mxfp8",
+    "convert_from_mxfp8",
 ]
