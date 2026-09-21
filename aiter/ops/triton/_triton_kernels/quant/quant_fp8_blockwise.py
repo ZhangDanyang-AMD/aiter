@@ -258,3 +258,95 @@ def requant_fp8_row_to_col_kernel(
     # Col dequant scales: shape (M//BLOCK_SIZE, K), one float per column element.
     col_scale_inv = tl.reshape(1.0 / col_scale, BLOCK_SIZE)  # (BLOCK,) dequant per col
     tl.store(y_scales_ptr + pid_m * K + offs_k, col_scale_inv, mask=offs_k < K)
+
+# --- restored from f2f8ed9b2 (pre ROCm/aiter#5149) ---------------------
+# Upstream re-landed this file with these renamed or dropped. Lumen
+# imports them by name, and its guard only catches ModuleNotFoundError,
+# so their absence surfaces as an ImportError that nothing handles.
+
+@triton.jit
+def compute_scale_and_quant(x_tile, x_tile_abs, axis, FP8_MAX):
+    x_tile_max = tl.max(x_tile_abs, axis=axis, keep_dims=True)
+    x_tile_max = tl.maximum(x_tile_max, 1e-4)
+    x_scales_tile = FP8_MAX / x_tile_max
+    x_fp8_tile = x_tile * x_scales_tile
+    x_fp8_tile = tl.clamp(x_fp8_tile, min=-FP8_MAX, max=FP8_MAX)
+    return x_fp8_tile, x_scales_tile
+
+
+@triton.jit
+def compute_m_range(
+    pid, batch_size, seg_indptr, scales_seg_indptr_ptr, BLOCK_SIZE: tl.constexpr
+):
+    bid = 0
+    for bs in range(batch_size):
+        tiles = tl.load(scales_seg_indptr_ptr + bs)
+        if pid >= tiles:
+            bid = bs
+    idx_start = tl.load(scales_seg_indptr_ptr + bid)
+
+    m_range_start = tl.load(seg_indptr + bid) + (pid - idx_start) * BLOCK_SIZE
+    m_range_end = min(tl.load(seg_indptr + bid + 1), m_range_start + BLOCK_SIZE)
+    return m_range_start, m_range_end, bid
+
+
+@triton.jit
+def quant_fp8_blockwise_for_act_grad_kernel(
+    x_ptr,
+    x_fp8_row_ptr,
+    x_scales_row_ptr,
+    x_fp8_col_ptr,
+    x_scales_col_ptr,
+    M,
+    N,
+    BLOCK_SIZE: tl.constexpr,
+    FP8_MAX: tl.constexpr,
+):
+    pid_m = tl.program_id(axis=0)
+    pid_n = tl.program_id(axis=1)
+    offs_m = tl.cast(pid_m * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE), tl.int64)
+    offs_n = tl.cast(pid_n * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE), tl.int64)
+    mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
+
+    # Load [BLOCK_SIZE, BLOCK_SIZE]
+    x_ptrs = x_ptr + offs_m[:, None] * N + offs_n[None, :]
+    x_tile = tl.load(x_ptrs, mask=mask, other=0.0).to(tl.float32)
+    x_tile_abs = tl.abs(x_tile)
+
+    # Row-wise quantization
+    x_fp8_tile_row, x_scales_tile_row = compute_scale_and_quant(
+        x_tile, x_tile_abs, 1, FP8_MAX
+    )
+
+    # Col-wise quantization
+    x_fp8_tile_col, x_scales_tile_col = compute_scale_and_quant(
+        x_tile, x_tile_abs, 0, FP8_MAX
+    )
+
+    # Store
+    x_fp8_row_ptrs = x_fp8_row_ptr + offs_m[:, None] * N + offs_n[None, :]
+    x_fp8_col_ptrs = x_fp8_col_ptr + offs_m[:, None] * N + offs_n[None, :]
+    tl.store(
+        x_fp8_row_ptrs, x_fp8_tile_row.to(x_fp8_row_ptr.dtype.element_ty), mask=mask
+    )
+    tl.store(
+        x_fp8_col_ptrs, x_fp8_tile_col.to(x_fp8_col_ptr.dtype.element_ty), mask=mask
+    )
+
+    # Store row-wise scales inverse: [M, N // BLOCK_SIZE]
+    row_scale_offs = offs_m * tl.cdiv(N, BLOCK_SIZE) + pid_n
+    x_scales_tile_row_inv = tl.reshape(1.0 / x_scales_tile_row, BLOCK_SIZE)
+    tl.store(
+        x_scales_row_ptr + row_scale_offs,
+        x_scales_tile_row_inv,
+        mask=offs_m < M,
+    )
+
+    # Store col-wise scales inverse: [M // BLOCK_SIZE, N]
+    col_scale_offs = pid_m * N + offs_n
+    x_scales_tile_col_inv = tl.reshape(1.0 / x_scales_tile_col, BLOCK_SIZE)
+    tl.store(
+        x_scales_col_ptr + col_scale_offs,
+        x_scales_tile_col_inv,
+        mask=offs_n < N,
+    )

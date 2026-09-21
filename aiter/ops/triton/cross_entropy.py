@@ -382,3 +382,13 @@ def cross_entropy_backward(
         num_stages=_NUM_STAGES,
     )
     return _input
+
+# --- restored from f2f8ed9b2 (pre ROCm/aiter#5149) ---------------------
+# Upstream re-landed this file with these renamed or dropped. Lumen
+# imports them by name, and its guard only catches ModuleNotFoundError,
+# so their absence surfaces as an ImportError that nothing handles.
+
+MAX_FUSED_SIZE = 65536 // 2
+
+
+NUM_WARPS = 16
